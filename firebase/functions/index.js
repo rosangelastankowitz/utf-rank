@@ -1,4 +1,9 @@
 const functions = require('firebase-functions');
+const admin = require('firebase-admin');
+var microtime = require('microtime')
+var crypto = require('crypto');
+
+admin.initializeApp(functions.config().firebase);
 
 var fs = require("fs");
 var text = fs.readFileSync("codes.txt").toString('utf-8');
@@ -8,14 +13,14 @@ function getRandomInt(max) {
   return Math.floor(Math.random() * Math.floor(max));
 }
 
-function generateNewPage(code) {
+function generateNewPage(timestamp, code, hash) {
   return "\
 <!DOCTYPE html>\
 <html>\
   <head>\
     <meta charset=\"utf-8\">\
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-    <title>Welcome to Firebase Hosting</title>\
+    <title>UTFRank</title>\
 \
  	<link rel=\"stylesheet\" href=\"https://utfrank-ddb59.firebaseapp.com/rateyo/jquery.rateyo.min.css\"/>\
 \
@@ -79,8 +84,10 @@ function generateNewPage(code) {
           onSet: function () {\
             console.log(\"On Set\");\
           }\
-        }).on(\"rateyo.set\", function () {console.log(\"rateyo.set\"); })\
-          .on(\"rateyo.change\", function () {console.log(\"rateyo.change\"); });\
+        }).on(\"rateyo.set\", function () {\
+				window.location.href = \"https://us-central1-utfrank-ddb59.cloudfunctions.net/getNewPhoto?timestamp=" + timestamp + "&code=" + code + "&hash=" + hash + "\" \
+			})\
+          .on(\"rateyo.change\", function () {});\
       });\
     </script>\
   </body>\
@@ -89,8 +96,28 @@ function generateNewPage(code) {
 }
 
 exports.getNewPhoto = functions.https.onRequest((request, response) => {
-	var idx = getRandomInt(codes.length - 1);	
-	var code = codes[idx];
+	// Part 1: compute vote ---------------------------------------------------
+	const vote_timestamp = req.query.timestamp;
+    const vote_code = req.query.code;
+    const vote_hash = req.query.hash;
 
-	response.send(generateNewPage(code));
+	// Part 2: show new picture -----------------------------------------------
+
+	// Gets random student code
+	var idx = getRandomInt(codes.length - 1);	
+	var lc_code = codes[idx];
+
+	// Gets timestamp and hashs with code
+	var lc_timestamp =	microtime.now();
+	var lc_hash = crypto.createHash('md5')
+		.update(lc_timestamp.toString() + lc_code.toString())
+		.digest('hex');
+
+	// Creates entry in database with new open vote
+	var ref = admin.database().ref("open_votes");
+    var childRef = ref.push();
+    childRef.set( {hash: lc_hash, code: lc_code, timestamp: lc_timestamp} );
+
+	// Send page to user
+	response.send(generateNewPage(lc_timestamp, lc_code, lc_code));
 });
