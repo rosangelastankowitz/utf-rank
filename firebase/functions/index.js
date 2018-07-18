@@ -7,13 +7,13 @@ admin.initializeApp(functions.config().firebase);
 
 var fs = require("fs");
 var text = fs.readFileSync("codes.txt").toString('utf-8');
-var codes = text.split("\n")
+var codes = text.split("\n");
 
 function getRandomInt(max) {
   return Math.floor(Math.random() * Math.floor(max));
 }
 
-function generateNewPage(timestamp, code, hash) {
+function generateNewPage(ref, timestamp, code, hash) {
   return "\
 <!DOCTYPE html>\
 <html>\
@@ -55,8 +55,7 @@ function generateNewPage(timestamp, code, hash) {
   <body>\
    <div id=\"message\">\
       <h2>UTFRank</h2>\
-      <h1>Qual a sua nota para essa pessoa?</h1>\
-      <p>" + code + "</p>\
+      <!-- <h1></h1> -->\
 		<img src=\"https://utfrank-ddb59.firebaseapp.com/photos/" + code + "\" />\
 	  <div id=\"voting\">\
  	  </div>\
@@ -79,13 +78,14 @@ function generateNewPage(timestamp, code, hash) {
           spacing: \"5px\",\
 		  fullStar: true,\
           onInit: function () {\
-            console.log(\"On Init\");\
+            \
           },\
           onSet: function () {\
-            console.log(\"On Set\");\
+            \
           }\
-        }).on(\"rateyo.set\", function () {\
-				window.location.href = \"https://us-central1-utfrank-ddb59.cloudfunctions.net/getNewPhoto?timestamp=" + timestamp + "&code=" + code + "&hash=" + hash + "\" \
+        }).on(\"rateyo.set\", function (e, data) {\
+				var rating = data.rating;\
+				window.location.href = \"https://us-central1-utfrank-ddb59.cloudfunctions.net/getNewPhoto?rating=rating&ref=" + ref + "&timestamp=" + timestamp + "&code=" + code + "&hash=" + hash + "\" \
 			})\
           .on(\"rateyo.change\", function () {});\
       });\
@@ -97,9 +97,38 @@ function generateNewPage(timestamp, code, hash) {
 
 exports.getNewPhoto = functions.https.onRequest((request, response) => {
 	// Part 1: compute vote ---------------------------------------------------
-	const vote_timestamp = req.query.timestamp;
-    const vote_code = req.query.code;
-    const vote_hash = req.query.hash;
+	let param_hash = request.query.hash;
+	let param_code = request.query.code;
+	let param_timestamp = request.query.timestamp;
+	let param_ref = request.query.ref;
+	let param_rating = request.query.rating;
+
+	if ((param_hash === undefined) || (param_code === undefined) ||
+			(param_timestamp === undefined) || (param_rating === undefined) ||
+			(param_rating === undefined)) {
+		console.log("All undefined");
+		var one = 1;
+	} else {
+		// 1. Check if hash is valid
+		var lc_hash_check = crypto.createHash('md5')
+			.update(param_timestamp.toString() + param_code.toString())
+			.digest('hex');
+		if (lc_hash_check === param_hash) {
+	
+			// 2. Remove from open_votes
+			var entryToRemoveRef = admin.database().ref("open_votes/" + param_ref);
+			entryToRemoveRef.remove();
+
+			// 3. Inserts in closed_votes
+			var closedVotesRef = admin.database().ref("closed_votes");
+			var newVoteRef = closedVotesRef.push();
+	    	newVoteRef.set( {code: param_code, rating: param_rating} );
+
+		} else {
+			console.log("lc_hash_check: " + lc_hash_check + " param_hash: " +
+			param_hash + " Invalid hash. Someone tried the hack :^(");
+		}
+	}
 
 	// Part 2: show new picture -----------------------------------------------
 
@@ -119,5 +148,6 @@ exports.getNewPhoto = functions.https.onRequest((request, response) => {
     childRef.set( {hash: lc_hash, code: lc_code, timestamp: lc_timestamp} );
 
 	// Send page to user
-	response.send(generateNewPage(lc_timestamp, lc_code, lc_code));
+	response.send(generateNewPage(childRef.getKey(), lc_timestamp, lc_code, lc_hash));
 });
+
